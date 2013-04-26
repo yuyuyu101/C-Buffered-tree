@@ -41,7 +41,7 @@ struct bftree {
 };
 
 static struct container *container_insert(struct bftree *tree, struct node *node,
-                                          uint32_t container_idx, struct payload *new_payload);
+        uint32_t container_idx, struct payload *new_payload);
 void bftree_node_print(struct node *node);
 static void validate_containers(struct node *node, key_compare_func compare);
 
@@ -109,7 +109,7 @@ void container_free(struct bftree *tree, struct container *container)
 }
 
 void insert_after_container(struct node *node, struct container *container,
-                            uint32_t container_idx)
+        uint32_t container_idx)
 {
     if (node->container_size == node->container_count) {
         node->containers = realloc(node->containers, sizeof(void*)*node->container_count*2);
@@ -188,21 +188,36 @@ void bftree_free(struct bftree *tree)
 }
 
 static uint32_t find_container(key_compare_func compare, struct node *node,
-                               void *key, uint32_t start_container)
+        void *key, uint32_t start_container)
 {
-    int i;
-    struct container *container;
+    int left, right, middle, result, compared;
+    struct container **containers;
 
-    for (i = start_container; i < node->container_size; i++) {
-        container = node->containers[i];
-        if (compare(key, container->payload_first->key) < 0) {
-            break;
+    left = start_container;
+    right = node->container_size - 1;
+    containers = node->containers;
+    while (left <= right) {
+        middle = (left + right) / 2;
+        compared = compare(key, containers[middle]->payload_first->key);
+        if (compared < 0) {
+            right = middle - 1;
+        } else if (compared > 0) {
+            left = middle + 1;
+        } else {
+            right = middle;
+            break ;
         }
     }
+    if (compared > 0)
+        result = left - 1;
+    else if (compared < 0)
+        result = right;
+    else
+        result = right;
 
-    if (i == 0)
+    if (result == 0)
         return 0;
-    return i - 1;
+    return right - 1;
 }
 
 static struct container *remove_container(struct node *node, uint32_t idx)
@@ -217,7 +232,7 @@ static struct container *remove_container(struct node *node, uint32_t idx)
 }
 
 static struct payload *get_payload(key_compare_func compare, struct payload *payload_start,
-                                   void *key, int *is_equal)
+        void *key, int *is_equal)
 {
     struct payload *curr_payload, *prev_payload;
     int compared;
@@ -242,7 +257,7 @@ static struct payload *get_payload(key_compare_func compare, struct payload *pay
 }
 
 static void push_to_child(struct bftree *tree, struct node *node,
-                          struct container *container)
+        struct container *container)
 {
     struct payload *curr_payload, *next_payload;
     uint32_t child_container, push_count;
@@ -527,40 +542,3 @@ void bftree_node_print(struct node *node)
     printf("\n");
 }
 
-int compare(const void *key1, const void *key2)
-{
-    return strcmp(key1, key2);
-}
-
-int main(int argc, const char *argv[])
-{
-    struct bftree *tree;
-    int i;
-    char *key, *val;
-    struct bftree_opts opts = {
-        NULL, NULL, compare, NULL, NULL
-    };
-    tree = bftree_create(&opts);
-    for (i = 0; i < 10000; ++i) {
-        key = malloc(10);
-        val = malloc(10);
-        snprintf(key, 10, "%s%d", "key", i);
-        snprintf(val, 10, "%s%d", "val", i);
-        assert(bftree_put(tree, key, val) == BF_OK);
-        char *r = bftree_get(tree, key);
-
-        if(!r || strcmp(r, val) != 0) {
-            bftree_node_print(tree->root);
-            assert(0);
-        }
-    }
-    printf("%d", tree->height);
-    for (i = 0; i < 10000; ++i) {
-        key = malloc(10);
-        snprintf(key, 10, "%s%d", "key", i);
-        assert(bftree_del(tree, key) == BF_OK);
-    }
-    printf("%d", tree->height);
-    bftree_free(tree);
-    return 0;
-}
