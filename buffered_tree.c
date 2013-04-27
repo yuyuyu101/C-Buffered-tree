@@ -262,7 +262,6 @@ static void push_to_child(struct bftree *tree, struct node *node,
     struct payload *curr_payload, *next_payload;
     uint32_t child_container, push_count;
     key_compare_func compare;
-    int skip_delete;
 
     compare = tree->opts->key_compare;
     curr_payload = container->payload_first->next;
@@ -270,19 +269,13 @@ static void push_to_child(struct bftree *tree, struct node *node,
 
     push_count = container->payload_size / 2;
     container->payload_size -= push_count;
-    if (tree->del_payload_count > tree->put_payload_count)
-        skip_delete = 1;
     while (push_count--) {
         next_payload = curr_payload->next;
         container->payload_first->next = next_payload;
-        if (curr_payload->type == Del && skip_delete) {
-            payload_free(tree, curr_payload);
-        } else {
-            child_container = find_container(compare, container->child,
-                    curr_payload->key, child_container);
-            container_insert(tree, container->child, child_container, curr_payload);
-            curr_payload = next_payload;
-        }
+        child_container = find_container(compare, container->child,
+                curr_payload->key, child_container);
+        container_insert(tree, container->child, child_container, curr_payload);
+        curr_payload = next_payload;
     }
 }
 
