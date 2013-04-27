@@ -96,6 +96,7 @@ void bftree_fetch(struct bftree *tree, int times)
         key = sdsnew(buf);
 
         assert(bftree_get(tree, key));
+        sdsfree(key);
     }
 }
 
@@ -112,9 +113,42 @@ void redis_fetch(dict *d, int times)
         key = sdsnew(buf);
 
         assert(dictFetchValue(d, key));
+        sdsfree(key);
     }
 }
 
+void redis_del(dict *d, int times)
+{
+    int i, j;
+    char buf[20];
+    sds key, val;
+
+    srand(1992);
+    for (i = 0; i < times; ++i) {
+        j = rand() % times;
+        snprintf(buf, 20, "key%d", j);
+        key = sdsnew(buf);
+
+        dictDelete(d, key);
+        sdsfree(key);
+    }
+}
+
+void bftree_delele(struct bftree *tree, int times)
+{
+    int i, j;
+    char buf[20];
+    sds key, val;
+
+    srand(1992);
+    for (i = 0; i < times; ++i) {
+        j = rand() % times;
+        snprintf(buf, 20, "key%d", j);
+        key = sdsnew(buf);
+
+        bftree_del(tree, key);
+    }
+}
 
 int main(int argc, const char *argv[])
 {
@@ -122,10 +156,10 @@ int main(int argc, const char *argv[])
     double elapsed;
     dict *d;
     struct bftree *tree;
-    const int times = 500000;
+    const int times = 500;
 
     struct bftree_opts opt = {
-        NULL, NULL, bftreeSdsKeyCompare, NULL, NULL
+        NULL, NULL, bftreeSdsKeyCompare, (void (*)(void*))sdsfree, (void (*)(void*))sdsfree
     };
     tree = bftree_create(&opt);
 
@@ -135,25 +169,40 @@ int main(int argc, const char *argv[])
     redis_add(d, times);
     gettimeofday(&end, NULL);
     elapsed = get_seconds(start, end);
-    printf("redis add seconds: %f\n", elapsed);
+    printf("redis add %d elements seconds: %f\n", times, elapsed);
 
     gettimeofday(&start, NULL);
     tree = bftree_add(tree, times);
     gettimeofday(&end, NULL);
     elapsed = get_seconds(start, end);
-    printf("bftree add seconds: %f\n", elapsed);
+    printf("bftree add %d elements seconds: %f\n", times, elapsed);
 
     gettimeofday(&start, NULL);
     redis_fetch(d, times);
     gettimeofday(&end, NULL);
     elapsed = get_seconds(start, end);
-    printf("redis seconds: %f\n", elapsed);
+    printf("redis get %d elements seconds: %f\n", times, elapsed);
 
     gettimeofday(&start, NULL);
     bftree_fetch(tree, times);
     gettimeofday(&end, NULL);
     elapsed = get_seconds(start, end);
-    printf("bftree seconds: %f\n", elapsed);
+    printf("bftree get %d elements seconds: %f\n", times, elapsed);
+
+    gettimeofday(&start, NULL);
+    redis_del(d, times);
+    gettimeofday(&end, NULL);
+    elapsed = get_seconds(start, end);
+    printf("redis delete %d elements seconds: %f\n", times, elapsed);
+
+    gettimeofday(&start, NULL);
+    bftree_delele(tree, times);
+    gettimeofday(&end, NULL);
+    elapsed = get_seconds(start, end);
+    printf("bftree delete %d elements seconds: %f\n", times, elapsed);
+
+    bftree_free(tree);
+    dictRelease(d);
 
     return 0;
 }

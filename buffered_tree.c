@@ -196,6 +196,7 @@ static uint32_t find_container(key_compare_func compare, struct node *node,
     left = start_container;
     right = node->container_size - 1;
     containers = node->containers;
+    compared = 0;
     while (left <= right) {
         middle = (left + right) / 2;
         compared = compare(key, containers[middle]->payload_first->key);
