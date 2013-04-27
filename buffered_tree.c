@@ -14,8 +14,8 @@ enum payload_type {
 struct payload {
     uint8_t *key;
     uint8_t *val;
-    enum payload_type type;
     struct payload *next;
+    enum payload_type type;
 };
 
 struct container {

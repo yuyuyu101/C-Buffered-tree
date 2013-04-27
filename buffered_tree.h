@@ -1,9 +1,11 @@
 #ifndef WHEAT_BUFFERED_TREE
 #define WHEAT_BUFFERED_TREE
 
-#define BFTREE_DEFAULT_CONTAINER       10
-#define BFTREE_PAYLOAD_THRESHOLD       100
+// Normally, L2 Cache line size is 128/256 bytes. 16 containers can
+// occupy 128 bytes
+#define BFTREE_DEFAULT_CONTAINER       16
 #define BFTREE_CONTAINER_THRESHOLD     16
+#define BFTREE_PAYLOAD_THRESHOLD       100
 
 #define BF_OK                          0
 #define BF_WRONG                       (-1)
