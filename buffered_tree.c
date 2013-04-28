@@ -40,6 +40,12 @@ struct bftree {
     uint32_t put_payload_count;
 };
 
+struct bftree_iterator {
+    struct bftree *tree;
+    struct node *curr;
+    struct node *next;
+};
+
 static struct container *container_insert(struct bftree *tree, struct node *node,
         uint32_t container_idx, struct payload *new_payload);
 void bftree_node_print(struct node *node);
@@ -456,10 +462,18 @@ static struct payload *container_get(struct bftree *tree, struct node *node,
     return NULL;
 }
 
+
+// ================================================================
+// ========================== Public API ==========================
+// ================================================================
+
 int bftree_put(struct bftree *tree, void *key, void *val)
 {
     struct payload *new_payload;
     uint32_t idx;
+
+    if (!tree || !key)
+        return BF_WRONG;
 
     new_payload = payload_create(key, val, Put);
     idx = find_container(tree->opts->key_compare, tree->root, new_payload->key, 0);
@@ -472,6 +486,9 @@ void *bftree_get(struct bftree *tree, void *key)
 {
     uint32_t idx;
     struct payload *r;
+
+    if (!tree || !key)
+        return NULL;
 
     idx = find_container(tree->opts->key_compare, tree->root, key, 0);
     r = container_get(tree, tree->root, idx, key);
@@ -487,11 +504,30 @@ int bftree_del(struct bftree *tree, void *key)
     uint32_t idx;
     struct payload *new_payload;
 
+    if (!tree || !key)
+        return BF_WRONG;
+
     new_payload = payload_create(key, NULL, Del);
     idx = find_container(tree->opts->key_compare, tree->root, new_payload->key, 0);
     container_insert(tree, tree->root, idx, new_payload);
 
     return BF_OK;
+}
+
+struct bftree_iterator *bftree_get_iterator(struct bftree *tree)
+{
+    struct bftree_iterator *iter;
+
+    iter = malloc(sizeof(*iter));
+    iter->tree = tree;
+    iter->next = iter->curr = NULL;
+
+    return iter;
+}
+
+struct payload *bftree_next(struct bftree_iterator *iter)
+{
+
 }
 
 // ================================================================
@@ -536,3 +572,258 @@ void bftree_node_print(struct node *node)
     printf("\n");
 }
 
+// ================================================================
+// ========================== Map Type Area =======================
+// ================================================================
+
+typedef char *wstr;
+
+struct wstrhd {
+    int len;
+    int free;
+    char buf[];
+};
+
+wstr wstr_newlen(const void *init, int init_len)
+{
+    struct wstrhd *sh;
+    sh = malloc(sizeof(struct wstrhd)+init_len+1);
+    if (sh == NULL) {
+        return NULL;
+    }
+    if (init) {
+        memcpy(sh->buf, init, init_len);
+        sh->len = init_len;
+        sh->free = 0;
+    } else {
+        sh->len = 0;
+        sh->free = init_len;
+    }
+    sh->buf[sh->len] = '\0';
+    return (wstr)(sh->buf);
+}
+
+static inline void wstr_free(wstr s)
+{
+    if (s == NULL) {
+        return ;
+    }
+    free(s - sizeof(struct wstrhd));
+}
+
+static inline int wstrlen(const wstr s)
+{
+    struct wstrhd *hd = (struct wstrhd *)(s - sizeof(struct wstrhd));
+    return hd->len;
+}
+
+int wstr_keycompare(const void *key1, const void *key2)
+{
+    int l1,l2;
+
+    l1 = wstrlen((wstr)key1);
+    l2 = wstrlen((wstr)key2);
+    if (l1 != l2) return 0;
+    return memcmp(key1, key2, l1);
+}
+
+static struct bftree_opts map_opt = {
+    NULL,
+    NULL,
+    wstr_keycompare,
+    (void (*)(void*))wstr_free,
+    (void (*)(void*))wstr_free
+};
+
+struct bftree *bftmap_create()
+{
+    return bftree_create(&map_opt);
+}
+
+void bftmap_free(struct bftree *tree)
+{
+    bftree_free(tree);
+}
+
+int bftmap_put(struct bftree *tree, char *key, size_t key_len, void *val)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    wstr s = wstr_newlen(key, key_len);
+    return bftree_put(tree, s, val);
+}
+
+void *bftmap_get(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return NULL;
+
+    void *r;
+    wstr s = wstr_newlen(key, key_len);
+    r = bftree_get(tree, s);
+    wstr_free(s);
+    return r;
+}
+
+int bftmap_del(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    wstr s = wstr_newlen(key, key_len);
+    return bftree_del(tree, s);
+}
+
+struct slice {
+    char *buf;
+    size_t len;
+};
+
+int slice_keycompare(const void *key1, const void *key2)
+{
+    int l1,l2;
+
+    l1 = ((struct slice*)key1)->len;
+    l2 = ((struct slice*)key2)->len;
+    if (l1 != l2) return 0;
+    return memcmp(((struct slice *)key1)->buf, ((struct slice *)key2)->buf, l1);
+}
+
+static struct bftree_opts map_nocopy_opt = {
+    NULL,
+    NULL,
+    slice_keycompare,
+    free,
+    free
+};
+
+struct bftree *bftmap_nocopy_create()
+{
+    return bftree_create(&map_nocopy_opt);
+}
+
+void bftmap_nocopy_free(struct bftree *tree)
+{
+    return bftree_free(tree);
+}
+
+int bftmap_nocopy_put(struct bftree *tree, char *key, size_t key_len, void *val)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    struct slice *s = malloc(sizeof(*s));
+    s->buf = key;
+    s->len = key_len;
+    return bftree_put(tree, s, val);
+}
+
+void *bftmap_nocopy_get(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return NULL;
+
+    struct slice s;
+    s.buf = key;
+    s.len = key_len;
+    return bftree_get(tree, &s);
+}
+
+int bftmap_nocopy_del(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    struct slice *s = malloc(sizeof(*s));
+    s->buf = key;
+    s->len = key_len;
+    return bftree_del(tree, s);
+}
+
+// ================================================================
+// ========================== Set Type Area =======================
+// ================================================================
+
+struct bftree *bftset_create()
+{
+    return bftree_create(&map_opt);
+}
+
+void bftset_free(struct bftree *tree)
+{
+    bftree_free(tree);
+}
+
+int bftset_put(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    wstr s = wstr_newlen(key, key_len);
+    return bftree_put(tree, s, NULL);
+}
+
+void *bftset_get(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return NULL;
+
+    void *r;
+    wstr s = wstr_newlen(key, key_len);
+    r = bftree_get(tree, s);
+    wstr_free(s);
+    return r;
+}
+
+int bftset_del(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    wstr s = wstr_newlen(key, key_len);
+    return bftree_del(tree, s);
+}
+
+struct bftree *bftset_nocopy_create()
+{
+    return bftree_create(&map_nocopy_opt);
+}
+
+void bftset_nocopy_free(struct bftree *tree)
+{
+    return bftree_free(tree);
+}
+
+int bftset_nocopy_put(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    struct slice *s = malloc(sizeof(*s));
+    s->buf = key;
+    s->len = key_len;
+    return bftree_put(tree, s, NULL);
+}
+
+void *bftset_nocopy_get(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return NULL;
+
+    struct slice s;
+    s.buf = key;
+    s.len = key_len;
+    return bftree_get(tree, &s);
+}
+
+int bftset_nocopy_del(struct bftree *tree, char *key, size_t key_len)
+{
+    if (!key || !key_len)
+        return BF_WRONG;
+
+    struct slice *s = malloc(sizeof(*s));
+    s->buf = key;
+    s->len = key_len;
+    return bftree_del(tree, s);
+}
