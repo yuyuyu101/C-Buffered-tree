@@ -35,6 +35,7 @@ buffer_tree.c of "Map Area" section.
 API
 ===========
 
+```c
 struct bftree *bftree_create(struct bftree_opts *opts);
 void bftree_free(struct bftree *tree);
 int bftree_put(struct bftree *tree, void *key, void *val);
@@ -47,3 +48,4 @@ int bftree_count(struct bftree *tree);
 struct bftree_iterator *bftree_get_iterator(struct bftree *tree);
 struct payload *bftree_next(struct bftree_iterator *iter);
 void bftree_free_iterator(struct bftree_iterator *iter);
+```

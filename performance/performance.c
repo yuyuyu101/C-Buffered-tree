@@ -156,7 +156,7 @@ int main(int argc, const char *argv[])
     double elapsed;
     dict *d;
     struct bftree *tree;
-    const int times = 50000;
+    const int times = 500;
 
     struct bftree_opts opt = {
         NULL, NULL, bftreeSdsKeyCompare, (void (*)(void*))sdsfree, (void (*)(void*))sdsfree
