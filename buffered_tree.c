@@ -6,18 +6,6 @@
 
 #include "buffered_tree.h"
 
-enum payload_type {
-    Put,
-    Del,
-};
-
-struct payload {
-    uint8_t *key;
-    uint8_t *val;
-    struct payload *next;
-    enum payload_type type;
-};
-
 struct container {
     struct payload *payload_first;
     uint32_t payload_size;
@@ -33,8 +21,8 @@ struct node {
 
 struct bftree {
     struct node *root;
-    uint32_t height;
     struct bftree_opts *opts;
+    uint32_t height;
     int is_migrated;
     uint32_t del_payload_count;
     uint32_t put_payload_count;
@@ -42,8 +30,8 @@ struct bftree {
 
 struct bftree_iterator {
     struct bftree *tree;
-    struct node *curr;
-    struct node *next;
+    struct payload *next;
+    int closed;
 };
 
 static struct container *container_insert(struct bftree *tree, struct node *node,
@@ -64,11 +52,11 @@ struct payload *payload_create(void *key, void *val, enum payload_type type)
     return payload;
 }
 
-void payload_free(struct bftree *tree, struct payload *payload)
+void payload_free(struct bftree *tree, struct payload *payload, int nofree)
 {
     if (payload->key && tree->opts->key_destructor)
         tree->opts->key_destructor(payload->key);
-    if (payload->val && tree->opts->val_destructor)
+    if (payload->val && tree->opts->val_destructor && !nofree)
         tree->opts->val_destructor(payload->val);
     if (payload->type == Put)
         tree->put_payload_count--;
@@ -85,7 +73,7 @@ void payload_replace(struct bftree *tree, struct payload *older, struct payload 
     older->val = newer->val;
     newer->val = temp;
     older->type = newer->type;
-    payload_free(tree, newer);
+    payload_free(tree, newer, 0);
 }
 
 struct container *container_create()
@@ -107,7 +95,7 @@ void container_free(struct bftree *tree, struct container *container)
     curr = container->payload_first;
     while (curr) {
         next = curr->next;
-        payload_free(tree, curr);
+        payload_free(tree, curr, 0);
         curr = next;
     }
 
@@ -158,22 +146,6 @@ void node_free(struct bftree *tree, struct node *node)
     free(node);
 }
 
-struct bftree *bftree_create(struct bftree_opts *opts)
-{
-    struct node *root;
-    struct bftree *tree;
-
-    tree = malloc(sizeof(*tree));
-    root = node_create(NULL);
-    tree->root = root;
-    tree->height = 1;
-    tree->opts = opts;
-    tree->is_migrated = 0;
-    tree->del_payload_count = tree->put_payload_count = 0;
-
-    return tree;
-}
-
 void bftree_free_node(struct bftree *tree, struct node *node)
 {
     int i;
@@ -185,12 +157,6 @@ void bftree_free_node(struct bftree *tree, struct node *node)
             bftree_free_node(tree, container->child);
     }
     node_free(tree, node);
-}
-
-void bftree_free(struct bftree *tree)
-{
-    bftree_free_node(tree, tree->root);
-    free(tree);
 }
 
 static uint32_t find_container(key_compare_func compare, struct node *node,
@@ -467,6 +433,29 @@ static struct payload *container_get(struct bftree *tree, struct node *node,
 // ========================== Public API ==========================
 // ================================================================
 
+struct bftree *bftree_create(struct bftree_opts *opts)
+{
+    struct node *root;
+    struct bftree *tree;
+
+    tree = malloc(sizeof(*tree));
+    root = node_create(NULL);
+    tree->root = root;
+    tree->height = 1;
+    tree->opts = opts;
+    tree->is_migrated = 0;
+    tree->del_payload_count = tree->put_payload_count = 0;
+    assert(opts->key_destructor && opts->val_destructor);
+
+    return tree;
+}
+
+void bftree_free(struct bftree *tree)
+{
+    bftree_free_node(tree, tree->root);
+    free(tree);
+}
+
 int bftree_put(struct bftree *tree, void *key, void *val)
 {
     struct payload *new_payload;
@@ -520,14 +509,80 @@ struct bftree_iterator *bftree_get_iterator(struct bftree *tree)
 
     iter = malloc(sizeof(*iter));
     iter->tree = tree;
-    iter->next = iter->curr = NULL;
+    iter->next = NULL;
+    iter->closed = 0;
 
     return iter;
 }
 
 struct payload *bftree_next(struct bftree_iterator *iter)
 {
+    struct bftree *tree;
+    struct container *container;
+    struct node *node;
+    struct payload *curr, *next, *min;
+    uint32_t idx;
+    key_compare_func key_compare;
+    int is_equal;
 
+    if (iter->closed)
+        return NULL;
+
+    tree = iter->tree;
+    key_compare = tree->opts->key_compare;
+    if (!iter->next) {
+        if (tree->root->container_size == 0)
+            return NULL;
+        iter->next = tree->root->containers[0]->payload_first;
+    }
+
+    curr = iter->next;
+    min = NULL;
+    node = tree->root;
+    do {
+        idx = find_container(key_compare, node, curr->key, 0);
+        container = node->containers[idx];
+        next = get_payload(key_compare, container->payload_first,
+                curr->key, &is_equal);
+        if (!next)
+            next = container->payload_first;
+        else
+            next = next->next;
+        if (next) {
+            if (!min) {
+                min = next;
+            } else if (key_compare(next->key, min->key) < 0) {
+                min = next;
+            }
+        }
+        node = container->child;
+    } while(node);
+
+    iter->next = min;
+    if (!min)
+        iter->closed = 1;
+
+    return curr;
+}
+
+void bftree_free_iterator(struct bftree_iterator *iter)
+{
+    free(iter);
+}
+
+int bftree_count(struct bftree *tree)
+{
+    struct bftree_iterator *iter;
+    int count;
+
+    count = 0;
+
+    iter = bftree_get_iterator(tree);
+    while (bftree_next(iter) != NULL)
+        count++;
+    bftree_free_iterator(iter);
+
+    return count;
 }
 
 // ================================================================
@@ -579,12 +634,11 @@ void bftree_node_print(struct node *node)
 typedef char *wstr;
 
 struct wstrhd {
-    int len;
-    int free;
+    size_t len;
     char buf[];
 };
 
-wstr wstr_newlen(const void *init, int init_len)
+static inline wstr wstr_newlen(const void *init, size_t init_len)
 {
     struct wstrhd *sh;
     sh = malloc(sizeof(struct wstrhd)+init_len+1);
@@ -594,16 +648,14 @@ wstr wstr_newlen(const void *init, int init_len)
     if (init) {
         memcpy(sh->buf, init, init_len);
         sh->len = init_len;
-        sh->free = 0;
     } else {
         sh->len = 0;
-        sh->free = init_len;
     }
     sh->buf[sh->len] = '\0';
     return (wstr)(sh->buf);
 }
 
-static inline void wstr_free(wstr s)
+static inline inline void wstr_free(wstr s)
 {
     if (s == NULL) {
         return ;
@@ -611,19 +663,19 @@ static inline void wstr_free(wstr s)
     free(s - sizeof(struct wstrhd));
 }
 
-static inline int wstrlen(const wstr s)
+static inline size_t wstrlen(const wstr s)
 {
     struct wstrhd *hd = (struct wstrhd *)(s - sizeof(struct wstrhd));
     return hd->len;
 }
 
-int wstr_keycompare(const void *key1, const void *key2)
+static inline int wstr_keycompare(const void *key1, const void *key2)
 {
-    int l1,l2;
+    size_t l1,l2;
 
     l1 = wstrlen((wstr)key1);
     l2 = wstrlen((wstr)key2);
-    if (l1 != l2) return 0;
+    if (l1 != l2) return l1 < l2 ? -1 : 1;
     return memcmp(key1, key2, l1);
 }
 
@@ -632,7 +684,7 @@ static struct bftree_opts map_opt = {
     NULL,
     wstr_keycompare,
     (void (*)(void*))wstr_free,
-    (void (*)(void*))wstr_free
+    free,
 };
 
 struct bftree *bftmap_create()
@@ -672,72 +724,6 @@ int bftmap_del(struct bftree *tree, char *key, size_t key_len)
         return BF_WRONG;
 
     wstr s = wstr_newlen(key, key_len);
-    return bftree_del(tree, s);
-}
-
-struct slice {
-    char *buf;
-    size_t len;
-};
-
-int slice_keycompare(const void *key1, const void *key2)
-{
-    int l1,l2;
-
-    l1 = ((struct slice*)key1)->len;
-    l2 = ((struct slice*)key2)->len;
-    if (l1 != l2) return 0;
-    return memcmp(((struct slice *)key1)->buf, ((struct slice *)key2)->buf, l1);
-}
-
-static struct bftree_opts map_nocopy_opt = {
-    NULL,
-    NULL,
-    slice_keycompare,
-    free,
-    free
-};
-
-struct bftree *bftmap_nocopy_create()
-{
-    return bftree_create(&map_nocopy_opt);
-}
-
-void bftmap_nocopy_free(struct bftree *tree)
-{
-    return bftree_free(tree);
-}
-
-int bftmap_nocopy_put(struct bftree *tree, char *key, size_t key_len, void *val)
-{
-    if (!key || !key_len)
-        return BF_WRONG;
-
-    struct slice *s = malloc(sizeof(*s));
-    s->buf = key;
-    s->len = key_len;
-    return bftree_put(tree, s, val);
-}
-
-void *bftmap_nocopy_get(struct bftree *tree, char *key, size_t key_len)
-{
-    if (!key || !key_len)
-        return NULL;
-
-    struct slice s;
-    s.buf = key;
-    s.len = key_len;
-    return bftree_get(tree, &s);
-}
-
-int bftmap_nocopy_del(struct bftree *tree, char *key, size_t key_len)
-{
-    if (!key || !key_len)
-        return BF_WRONG;
-
-    struct slice *s = malloc(sizeof(*s));
-    s->buf = key;
-    s->len = key_len;
     return bftree_del(tree, s);
 }
 
@@ -782,48 +768,5 @@ int bftset_del(struct bftree *tree, char *key, size_t key_len)
         return BF_WRONG;
 
     wstr s = wstr_newlen(key, key_len);
-    return bftree_del(tree, s);
-}
-
-struct bftree *bftset_nocopy_create()
-{
-    return bftree_create(&map_nocopy_opt);
-}
-
-void bftset_nocopy_free(struct bftree *tree)
-{
-    return bftree_free(tree);
-}
-
-int bftset_nocopy_put(struct bftree *tree, char *key, size_t key_len)
-{
-    if (!key || !key_len)
-        return BF_WRONG;
-
-    struct slice *s = malloc(sizeof(*s));
-    s->buf = key;
-    s->len = key_len;
-    return bftree_put(tree, s, NULL);
-}
-
-void *bftset_nocopy_get(struct bftree *tree, char *key, size_t key_len)
-{
-    if (!key || !key_len)
-        return NULL;
-
-    struct slice s;
-    s.buf = key;
-    s.len = key_len;
-    return bftree_get(tree, &s);
-}
-
-int bftset_nocopy_del(struct bftree *tree, char *key, size_t key_len)
-{
-    if (!key || !key_len)
-        return BF_WRONG;
-
-    struct slice *s = malloc(sizeof(*s));
-    s->buf = key;
-    s->len = key_len;
     return bftree_del(tree, s);
 }

@@ -1,4 +1,4 @@
-Buffered-tree
+C-Buffered-tree
 ===========
 
 [Buffered-tree](http://www.cs.cmu.edu/~guyb/realworld/slidesF10/buffertree.pdf)
@@ -19,3 +19,31 @@ I will deliver my buffered-tree version compared to Google version and other
 hash implementation.
 
 More data structure supporting based on buffered-tree is on going.
+
+Usage
+===========
+
+see buftree_example.c
+
+Customizer
+===========
+
+C-Buffered-tree is aimed to provide a general dictionary structure to users.
+So users can easily expand more types. You can find example on the bottom of
+buffer_tree.c of "Map Area" section.
+
+API
+===========
+
+struct bftree *bftree_create(struct bftree_opts *opts);
+void bftree_free(struct bftree *tree);
+int bftree_put(struct bftree *tree, void *key, void *val);
+void *bftree_get(struct bftree *tree, void *key);
+int bftree_del(struct bftree *tree, void *key);
+// Ineffective count implementation!!!! Don't call it if big tree
+int bftree_count(struct bftree *tree);
+
+// Iterator is in ordering!
+struct bftree_iterator *bftree_get_iterator(struct bftree *tree);
+struct payload *bftree_next(struct bftree_iterator *iter);
+void bftree_free_iterator(struct bftree_iterator *iter);

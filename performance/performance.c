@@ -62,7 +62,7 @@ int bftreeSdsKeyCompare(const void *key1, const void *key2)
 
     l1 = sdslen((sds)key1);
     l2 = sdslen((sds)key2);
-    if (l1 != l2) return 0;
+    if (l1 != l2) return l1 < l2 ? -1 : 1;
     return memcmp(key1, key2, l1);
 }
 
@@ -156,7 +156,7 @@ int main(int argc, const char *argv[])
     double elapsed;
     dict *d;
     struct bftree *tree;
-    const int times = 5000000;
+    const int times = 50000;
 
     struct bftree_opts opt = {
         NULL, NULL, bftreeSdsKeyCompare, (void (*)(void*))sdsfree, (void (*)(void*))sdsfree

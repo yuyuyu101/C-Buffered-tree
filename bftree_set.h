@@ -3,6 +3,10 @@
 
 #include "buffered_tree.h"
 
+// bftmap ownership:
+// `key` will be copied and store. User should free `key` buffer passed in
+
+// key is char*
 struct bftree *bftset_create();
 void bftset_free(struct bftree *tree);
 int bftset_put(struct bftree *tree, char *key, size_t key_len);
